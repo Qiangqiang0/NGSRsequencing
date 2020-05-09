@@ -36,7 +36,7 @@ bwa index ref.fa
 fastqc -o outdir -t threads fastq1 fastq2
 ```
 
-2. trimmomantic
+2. trimmomantic and another fastqc on the output
 
 strongly suggested to page: http://www.usadellab.org/cms/?page=trimmomatic for details
 
@@ -55,11 +55,21 @@ https://www.cnblogs.com/Formulate0303/p/7826944.html
 http://davetang.org/wiki/tiki-index.php?page=SAM 
 
 bwa mem works better for 70-100bp
+
 baw -M: mark shorter split hits as secondary, otherwise it will be makred as supplementary
 
 ```bash
-bwa mem -t 2 -R "@RG\tID:A\tSM:A" -M ref.fa z fastq1 fastq2 > fastq.sam
+bwa mem -t 2 -R "@RG\tID:A\tSM:A" -M ref.fa  fastq > fastq_se.sam
+bwa mem -t 2 -R "@RG\tID:A\tSM:A" -M ref.fa  fastq1 fastq2 > fastq_pe.sam
 ```
 
-
+4. samtools: sort 
+```bash
+samtools view -bS fastq.sam > fastq.bam
+samtools sort fastq.bam > fastq.sorted.bam
+# or 
+samtolls view -bS fastq.sam | samtools sort >fastq.sorted.bam
+# or 
+java -jar picard.jar SortSam 
+```
 
