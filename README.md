@@ -29,6 +29,15 @@ bwa index ref.fa
 #samtools fadix ref.fa
 ```
 
+0. install gatk
+```bash
+# conda
+
+conda install gatk
+# run gatk-register to get the download page
+gatk-register /dowloadedgatk.jar|tar.bz2
+
+```
 1. fastqc
 
 ```bash
@@ -68,8 +77,38 @@ bwa mem -t 2 -R "@RG\tID:A\tSM:A" -M ref.fa  fastq1 fastq2 > fastq_pe.sam
 samtools view -bS fastq.sam > fastq.bam
 samtools sort fastq.bam > fastq.sorted.bam
 # or 
-samtolls view -bS fastq.sam | samtools sort >fastq.sorted.bam
+samtools view -bS fastq.sam | samtools sort >fastq.sorted.bam
 # or 
-java -jar picard.jar SortSam 
+java -jar picard.jar SortSam SORT_ORDER="coordinate"
 ```
+
+5. marking duplicates
+
+duplicates come fom PCR amplification
+
+```bash
+java -jar pycard.jar MarkDuplicates I= fastq.sorted.bam  O= fastq.sorted.dup.bam M= fastq.sorted.dup.metrics
+```
+
+6. indel detection
+* realign: get the output of intervals to show possible indels
+
+* variant calling:HaplotypeCaller: slow but efficient,UnifiedGenotyper: less efficient but faster
+
+  * __multi-sample calling__: slow but more trustable
+  * __single-sample calling__: generate gvcf and combined into vcf
+
+```bash
+picard CreateSequenceDictionary REFERENCE= ref.fa OUTPUT= ref.dict
+gatk3 -T RealignerTargetCreator -R  ref.fa  -I fastq.sorted.dup.bam -o possible_indel.intervels
+gatk3 -T IndelRealigner -R ref.fa -I fastq.sorted.dup.bam -o fastq.sorted.dup.bam.re --targetIntervals possible_index.intervels
+
+# single-sample calling
+gatk3 -T HaplotypeCaller -R ref.fa -o fastq.vcf -I fastq.sorted.dup.bam.re --emitRefConfidence GVCF -nct threads
+
+
+```
+
+
+
 
