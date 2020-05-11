@@ -72,7 +72,7 @@ bwa mem -t threads -R "@RG\tID:A\tSM:A" -M ref.fa  fastq > fastq_se.sam
 bwa mem -t threads -R "@RG\tID:A\tSM:A" -M ref.fa  fastq1 fastq2 > fastq_pe.sam
 ```
 
-4. samtools: sort 
+4. samtools: sort
 ```bash
 samtools view -bS fastq.sam > fastq.bam
 samtools sort fastq.bam > fastq.sorted.bam
@@ -80,6 +80,8 @@ samtools sort fastq.bam > fastq.sorted.bam
 samtools view -bS fastq.sam | samtools sort >fastq.sorted.bam
 # or 
 java -jar picard.jar SortSam SORT_ORDER="coordinate"
+
+
 ```
 
 5. marking duplicates
@@ -87,7 +89,7 @@ java -jar picard.jar SortSam SORT_ORDER="coordinate"
 duplicates come fom PCR amplification
 
 ```bash
-java -jar pycard.jar MarkDuplicates I= fastq.sorted.bam  O= fastq.sorted.dup.bam M= fastq.sorted.dup.metrics
+java -jar picard.jar MarkDuplicates I= fastq.sorted.bam  O= fastq.sorted.dup.bam M= fastq.sorted.dup.metrics
 ```
 
 6. indel detection
@@ -98,17 +100,33 @@ java -jar pycard.jar MarkDuplicates I= fastq.sorted.bam  O= fastq.sorted.dup.bam
   * __multi-sample calling__: slow but more trustable
   * __single-sample calling__: generate gvcf and combined into vcf
 
+  * using __--dbsnp__ to have snp reference
+
 ```bash
 picard CreateSequenceDictionary REFERENCE= ref.fa OUTPUT= ref.dict
-gatk3 -T RealignerTargetCreator -R  ref.fa  -I fastq.sorted.dup.bam -o possible_indel.intervels
-gatk3 -T IndelRealigner -R ref.fa -I fastq.sorted.dup.bam -o fastq.sorted.dup.bam.re --targetIntervals possible_index.intervels
+gatk3 -T RealignerTargetCreator -R  ref.fa  -I fastq.sorted.dup.bam -o possible_indel.intervals
+gatk3 -T IndelRealigner -R ref.fa -I fastq.sorted.dup.bam -o fastq.sorted.dup.re.bam --targetIntervals possible_indel.intervals
 
 # single-sample calling
-gatk3 -T HaplotypeCaller -R ref.fa -o fastq.vcf -I fastq.sorted.dup.bam.re --emitRefConfidence GVCF -nct threads
+gatk3 -T HaplotypeCaller -R ref.fa -o fastq.gvcf -I fastq.sorted.dup.re.bam --emitRefConfidence GVCF -nct 24  -variant_index_type LINEAR -variant_index_parameter 128000
+gatk3 -T   CombineGVCFs -R  ref.fa -o fastq.vcf -V fastq1.gvcf -V ...
+
+# multi-sample calling
+gatk3 -T HaplotypeCaller -R ref.fa -o fastq.vcf -I fastq.sorted.dup.re.bam  -nct 24
 
 
 ```
 
+S1. BQSR: base quality score recalibration
+
+rectify the quality score of base,for humans download the data, for other creatures, creat it by yourself
+
+ref: https://www.bioinfo-scrounger.com/archives/642/
+```bash
+gatk3 -T BaseRecalibrator -R ref.fa -knownSites dbsnp_137.hg19.vcf -knownSites Mills_and_1000G_gold_standard.indels.hg19.vcf -knownSites 1000G_phase1.indels.hg19.vcf -I fastq.bam -o fastq.bam.grp
+gatk3 -T ApplyBQSR -R ref.fa -I fastq.bam --bqsr-recal-file fastq.bam.grp -O $sample.sorted.marked.BQSR.bam
+
+```
 
 
 
