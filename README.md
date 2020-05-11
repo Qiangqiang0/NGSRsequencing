@@ -1,4 +1,4 @@
-# Bioinformatics
+# NGS Resequencing
 
 
 ## 1. genome resequencing
