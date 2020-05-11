@@ -22,11 +22,11 @@ raw_data(fastq) --> trimmomatic(fastq) --> bwa(sam) -->samtools(bam,sorted) --> 
 fasterq-dump --split-3 -O outdir seq.sra
 ```
 
-0. reference index `bwa` or `samtools`
+0. reference index `bwa` and `samtools`
 
 ```bash
 bwa index ref.fa
-#samtools fadix ref.fa
+samtools faidx ref.fa
 ```
 
 0. install gatk
@@ -51,10 +51,10 @@ strongly suggested to page: http://www.usadellab.org/cms/?page=trimmomatic for d
 
 ```bash
 # single end with SE
-java -jar trimmomatic-0.38.jar SE -threads 4 -phred33 fastq output_fastq ILLUMINACLIP:/Trimmomatic-0.38/adapters/TruSeq2-PE.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
+java -jar trimmomatic-0.38.jar SE -threads 4 (-phred33|-phred64) fastq output_fastq ILLUMINACLIP:/Trimmomatic-0.38/adapters/TruSeq2-PE.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
 
 ## paird end with PE
-java -jar trimmomatic-0.38.jar PE -threads 4 -phred33 forward.fastq inverse.fastq output_forward.fastq output_inverse.fastq ILLUMINACLIP::TruSeq3-PE.fa:2:30:10:2:keepBothReads LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
+java -jar trimmomatic-0.38.jar PE -threads 4 (-phred33|-phred64) forward.fastq inverse.fastq output_forward.fastq output_inverse.fastq ILLUMINACLIP::TruSeq3-PE.fa:2:30:10:2:keepBothReads LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
 ```
 
 3. bwa
@@ -68,8 +68,8 @@ bwa mem works better for 70-100bp
 baw -M: mark shorter split hits as secondary, otherwise it will be makred as supplementary
 
 ```bash
-bwa mem -t 2 -R "@RG\tID:A\tSM:A" -M ref.fa  fastq > fastq_se.sam
-bwa mem -t 2 -R "@RG\tID:A\tSM:A" -M ref.fa  fastq1 fastq2 > fastq_pe.sam
+bwa mem -t threads -R "@RG\tID:A\tSM:A" -M ref.fa  fastq > fastq_se.sam
+bwa mem -t threads -R "@RG\tID:A\tSM:A" -M ref.fa  fastq1 fastq2 > fastq_pe.sam
 ```
 
 4. samtools: sort 
