@@ -1,5 +1,7 @@
 # NGS Resequencing
 
+# GWAS, Construct genetic map, population evolution
+
 
 ## 1. genome resequencing
 
@@ -115,7 +117,14 @@ gatk3 -T   CombineGVCFs -R  ref.fa -o fastq.vcf -V fastq1.gvcf -V ...
 # multi-sample calling
 gatk3 -T HaplotypeCaller -R ref.fa -o fastq.vcf -I fastq.sorted.dup.re.bam  -nct 24
 
+# 
+gatk3 -T GenotypeGVCFs -R ref.fa -V fastq.vcf -O common.vcf.gz
 
+# select SNP
+gatk3 -T  SelectVariants -R ref.fa -O SNP.vcf --variant common.vcf.gz --select-type-to-include SNP 
+
+# select indel
+gatk3 -T  SelectVariants -R ref.fa -O indel.vcf --variant common.vcf.gz --select-type-to-include INDEL
 ```
 
 #### S1. BQSR: base quality score recalibration
@@ -133,3 +142,42 @@ gatk3 -T ApplyBQSR -R ref.fa -I fastq.bam --bqsr-recal-file fastq.bam.grp -O $sa
 
 
 
+
+## RAD-seq:
+
+### 1. basics
+
+using enzyme to digest genome, collect sequence around enzyme clevage sites.
+
+process:
+
+1. digestion;
+
+2. add pcr primer barcode to the collected sequence
+
+3. random breaking the sequence
+
+4. add another pcr primer adaptor2
+
+5. pcr on barcode and adaptor
+
+6. seq
+
+7. if (genome_is_avaiable){
+	align to get SNP
+} else{
+	using different samples to discover SNP.
+	avaible tools: __RADtools__, __Stacks__
+}
+
+
+## GBS
+
+ref for GBS
+
+ref for difference between GBS and RAD-seq: http://www.360doc.com/content/18/0220/11/33459258_730961471.shtml
+
+
+## BSA
+
+ref: https://m.imooc.com/article/details?article_id=268903
