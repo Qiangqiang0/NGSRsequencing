@@ -171,6 +171,9 @@ process:
 }
 
 
+### 2. Stacks
+
+
 ## GBS
 
 ref for GBS
@@ -178,6 +181,64 @@ ref for GBS
 ref for difference between GBS and RAD-seq: http://www.360doc.com/content/18/0220/11/33459258_730961471.shtml
 
 
+### 1. TASSEL-GBS
+
+
+
+
 ## BSA
 
 ref: https://m.imooc.com/article/details?article_id=268903
+
+
+## vcf data analysis
+
+### 1. annovar based documentation
+
+1. what is annovar?
+
+ref: https://doc-openbio.readthedocs.io/projects/annovar/en/latest/
+
+	* Gene-based annotation: identify whether SNPs or CNVs cause protein coding changes and the amino acids that are affected
+
+	* Region-based annotation: identify variants in specific genomic regions, for example, conserved regions among 44 species, predicted transcription factor binding sites, segmental duplication regions...
+
+	* Filter-based annotation: identify variants that are documented in specific databases
+
+	* Other functionalities: Retrieve the nucleotide sequence in any user-specific genomic positions in batch, identify a candidate gene list for Mendelian diseases from exome data, and other utilities.
+
+
+
+
+
+### 2. snpEff
+
+download snpEff from: 
+
+sneff build:
+
+```bash
+cd snpEff
+mkdir genomes
+mkidr arath
+
+
+
+
+
+```
+
+snpEff 
+
+
+
+
+### gff3 to gtf tools
+
+gffread in cufflinks
+
+gffread gff3 -T -o gtf
+
+gffread gtf -o- > gff3
+1. ncbi - genome
+2. ensemble - 
