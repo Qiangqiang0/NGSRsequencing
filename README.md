@@ -3,8 +3,11 @@
 # GWAS, Construct genetic map, population evolution
 
 
-## 1. genome resequencing
+## 1. GATK TOOLS PIPLINE
 
+* __germline__: preprocess --> haplotyperCaller --> VQSR --> downstream
+
+* __somatic__: preprocess --> mutect
 
 ### 1. Basics
 
@@ -87,58 +90,334 @@ java -jar picard.jar SortSam SORT_ORDER="coordinate"
 
 ```
 
-#### 5. marking duplicates
+#### 5. Preprocess
 
 duplicates come fom PCR amplification
 
+BQSR
 ```bash
-java -jar picard.jar MarkDuplicates I= fastq.sorted.bam  O= fastq.sorted.dup.bam M= fastq.sorted.dup.metrics
+
+picard MarkDuplicates I= $inputs  O= $dup M= $metrics
+
+samtools index $dup
+
+#2. BQSR
+
+bqsr=${dup%.*}.bqsr
+BQSRReport=${bqsr}.table
+
+#bqsr report
+gatk4 BaseRecalibrator -R $ref -I $dup -O $BQSRReport $knownSites
+
+gatk4 GatherBQSRReports -I $BQSRReport -O $BQSRReport.report
+
+
+#Apply bqsr
+
+gatk4 ApplyBQSR -R $ref -I $dup -O $bqsr.bam -bqsr $BQSRReport \
+      --static-quantized-quals 10 --static-quantized-quals 20 --static-quantized-quals 30 \
+      --add-output-sam-program-record \
+      --create-output-bam-md5 \
+      --use-original-qualities
+
+
 ```
 
-#### 6. indel detection
-* realign: get the output of intervals to show possible indels
+#### 6. Germline indel
+
+ref: https://gatk.broadinstitute.org/hc/en-us/articles/360035535932-Germline-short-variant-discovery-SNPs-Indels-
+
+ref: https://github.com/gatk-workflows
 
 * variant calling:HaplotypeCaller: slow but efficient,UnifiedGenotyper: less efficient but faster
 
-  * __multi-sample calling__: slow but more trustable
-  * __single-sample calling__: generate gvcf and combined into vcf
-
-  * using __--dbsnp__ to have snp reference
+* using __--dbsnp__ to have snp reference
 
 ```bash
-picard CreateSequenceDictionary REFERENCE= ref.fa OUTPUT= ref.dict
-gatk3 -T RealignerTargetCreator -R  ref.fa  -I fastq.sorted.dup.bam -o possible_indel.intervals
-gatk3 -T IndelRealigner -R ref.fa -I fastq.sorted.dup.bam -o fastq.sorted.dup.re.bam --targetIntervals possible_indel.intervals
+#1. HaplotyperCaller
 
-# single-sample calling
-gatk3 -T HaplotypeCaller -R ref.fa -o fastq.gvcf -I fastq.sorted.dup.re.bam --emitRefConfidence GVCF -nct 24  -variant_index_type LINEAR -variant_index_parameter 128000
-gatk3 -T   CombineGVCFs -R  ref.fa -o fastq.vcf -V fastq1.gvcf -V ...
+gatk4 HaplotypeCaller \
+        -R $ref \
+        -I $ACC \
+        -O $outdir\$ACC.g.vcf \
+        -ERC GVCF \
+        -contamination 0
 
-# multi-sample calling
-gatk3 -T HaplotypeCaller -R ref.fa -o fastq.vcf -I fastq.sorted.dup.re.bam  -nct 24
+#2. consolidate with genomicsDBImport
 
-# 
-gatk3 -T GenotypeGVCFs -R ref.fa -V fastq.vcf -O common.vcf.gz
+#Check dbimport directory
 
-# select SNP
-gatk3 -T  SelectVariants -R ref.fa -O SNP.vcf --variant common.vcf.gz --select-type-to-include SNP 
+gatk4 GenomicsDBImport \
+        --genomicsdb-workspace-path dbimport \
+        -L $intervals \
+        --sample-name-map vcf.txt \
+        --reader-threads 5 \
+        --merge-input-intervals \
+        --consolidate
 
-# select indel
-gatk3 -T  SelectVariants -R ref.fa -O indel.vcf --variant common.vcf.gz --select-type-to-include INDEL
+
+#3. GenotypeGVCFs: joint-call corhort
+gatk4 GenotypeGVCFs \
+        -R $ref \
+        -O out.db.vcf \
+        -V gendb://dbimport \
+        -L $intervals \
+        --merge-input-intervals
+
 ```
 
-#### S1. BQSR: base quality score recalibration
+#### 7. VQSR
 
-rectify the quality score of base,for humans download the data, for other creatures, creat it by yourself
+If having joint data: VQSR
 
-if you DO BSQR,plsease go to 
-ref: https://www.bioinfo-scrounger.com/archives/642/
-ref: https://www.plob.org/article/7009.html
+If having single g.vcf: CNNScoreVariant
+
+You should also know Hard filter 
+
+ref: https://gatk.broadinstitute.org/hc/en-us/articles/360035531612-Variant-Quality-Score-Recalibration-VQSR-
+ref: https://gatk.broadinstitute.org/hc/en-us/articles/360035531112--How-to-Filter-variants-either-with-VQSR-or-by-hard-filtering
+
 ```bash
-gatk3 -T BaseRecalibrator -R ref.fa -knownSites dbsnp_137.hg19.vcf -knownSites Mills_and_1000G_gold_standard.indels.hg19.vcf -knownSites 1000G_phase1.indels.hg19.vcf -I fastq.bam -o fastq.bam.grp
-gatk3 -T ApplyBQSR -R ref.fa -I fastq.bam --bqsr-recal-file fastq.bam.grp -O $sample.sorted.marked.BQSR.bam
+
+## 4.1 VariantFiltration
+gatk4 VariantFiltration \
+        -V out.db.vcf \
+        --filter-expression "ExcessHet > 54.69" \
+        --filter-name ExcessHet \
+        -O out.db.excess.vcf.gz
+
+## 4.2 sites only
+gatk4 MakeSitesOnlyVcf \
+        -I out.db.excess.vcf.gz \
+        -O out.db.excess.sitesonly.vcf.gz
+
+## 4.3 Calculate VQSLOD
+#variantRecalibrator for indel
+gatk4 VariantRecalibrator \
+        -V out.db.excess.sitesonly.vcf.gz \
+        ---trust-all-polymorphic \
+            -tranche 100.0 -tranche 99.95 -tranche 99.9 -tranche 99.5 -tranche 99.0 -tranche 97.0 -tranche 96.0 -tranche 95.0 -tranche 94.0 -tranche 93.5 -tranche 93.0 -tranche 92.0 -tranche 91.0 -tranche 90.0 \
+    -an FS -an ReadPosRankSum -an MQRankSum -an QD -an SOR -an DP \
+    -mode INDEL \
+    --max-gaussians 4 \
+    -resource $resource \
+    -O out.db.excess.sitesonly.indel.recal \
+    --tranches-file out.db.excess.sitesonly.indel.tranches
+
+#variantRecalibrator for snp
+gatk4 VariantRecalibrator \
+        -V out.db.excess.sitesonly.vcf.gz \
+        ---trust-all-polymorphic \
+            -tranche 100.0 -tranche 99.95 -tranche 99.9 -tranche 99.5 -tranche 99.0 -tranche 97.0 -tranche 96.0 -tranche 95.0 -tranche 94.0 -tranche 93.5 -tranche 93.0 -tranche 92.0 -tranche 91.0 -tranche 90.0 \
+    -an FS -an ReadPosRankSum -an MQRankSum -an QD -an SOR -an DP \
+    -mode SNP \
+    --max-gaussians 4 \
+    -resource $resource \
+    -O out.db.excess.sitesonly.snp.recal \
+    --tranches-file out.db.excess.sitesonly.snp.tranches
+
+## 4.4 applyVQSR
+#ApplyVQSR for indel
+gatk4 ApplyVQSR \
+        -V out.excess.vcf.gz \
+        --recal-file out.db.excess.sitesonly.indel.recal \
+        --tranches-file out.db.excess.sitesonly.indel.tranches \
+        --turth-sentitivity-filter-level 99.7 \
+        --creat-output-variant-index true \
+        -mode INDEL \
+        -O out.db.excess.indel.recal.vcf.gz
+
+
+
+#ApplyVQSR for snp
+
+gatk4 ApplyVQSR \
+        -V out.excess.vcf.gz \
+        --recal-file out.db.excess.sitesonly.snp.recal \
+        --tranches-file out.db.excess.sitesonly.snp.tranches \
+        --turth-sentitivity-filter-level 99.7 \
+        --creat-output-variant-index true \
+        -mode INDEL \
+        -O out.db.excess.snp.recal.vcf.gz
+
+gatk CollectVariantCallingMetrics \
+    -I out.db.excess.indel.recal.vcf.gz \
+    --DBSNP $dbsnp \
+    -SD $dbsnp.dict \
+    -O indel.metrics
+
+gatk CollectVariantCallingMetrics \
+    -I out.db.excess.snp.recal.vcf.gz \
+    --DBSNP $dbsnp \
+    -SD $dbsnp.dict \
+    -O snp.metrics
 
 ```
+
+HERE SHOWS HARD FILTER
+```bash
+#select variant
+gatk SelectVariants \
+    -V cohort.vcf.gz \
+    -select-type SNP \
+    -O snps.vcf.gz
+
+
+
+gatk SelectVariants \
+    -V cohort.vcf.gz \
+    -select-type INDEL \
+    -O indels.vcf.gz
+
+
+# variant filtration
+gatk VariantFiltration \
+    -V snps.vcf.gz \
+    -filter "QD < 2.0" --filter-name "QD2" \
+    -filter "QUAL < 30.0" --filter-name "QUAL30" \
+    -filter "SOR > 3.0" --filter-name "SOR3" \
+    -filter "FS > 60.0" --filter-name "FS60" \
+    -filter "MQ < 40.0" --filter-name "MQ40" \
+    -filter "MQRankSum < -12.5" --filter-name "MQRankSum-12.5" \
+    -filter "ReadPosRankSum < -8.0" --filter-name "ReadPosRankSum-8" \
+    -O snps_filtered.vcf.gz
+
+gatk VariantFiltration \
+    -V indels.vcf.gz \
+    -filter "QD < 2.0" --filter-name "QD2" \
+    -filter "QUAL < 30.0" --filter-name "QUAL30" \
+    -filter "FS > 200.0" --filter-name "FS200" \
+    -filter "ReadPosRankSum < -20.0" --filter-name "ReadPosRankSum-20" \
+    -O indels_filtered.vcf.gz
+
+
+
+# filter evaluation
+gatk CollectVariantCallingMetrics \
+    -I filtered.vcf.gz \
+    --DBSNP Homo_sapiens_assembly38.dbsnp138.vcf \
+    -SD Homo_sapiens_assembly38.dict \
+    -O metrics
+~
+
+```
+
+### somantic detection
+
+ref: https://gatk.broadinstitute.org/hc/en-us/articles/360035890491?id=11127
+ref: https://gatk.broadinstitute.org/hc/en-us/articles/360035890631-Panel-of-Normals-PON-
+
+Panel of Normals(PON):A Panel of Normal or PON is a type of resource used in somatic variant analysis. Depending on the type of variant you're looking for, the PON will be generated differently. What all PONs have in common is that (1) they are made from normal samples (in this context, "normal" means derived from healthy tissue that is believed to not have any somatic alterations) and (2) their main purpose is to capture recurrent technical artifacts in order to improve the results of the variant calling analysis.
+
+There is no definitive rule for how many samples should be used to make a PON (even a small PON is better than no PON) but in practice we recommend aiming for a minimum of 40.
+
+
+```bash
+# 1. create pon
+
+gatk4 Mutect2  -R ${ref} -I \
+	$input \
+	-max-mnp-distance 0 --independent-mates  \
+	-L $intervals -O $input.vcf.gz
+
+gatk4 GenomicsDBImport --genomicsdb-workspace-path $pon_db -R $ref -V $input -L $intervals
+
+gatk4 SelectVariants -R ${ref} -V gendb://$pon_db -o check.vcf
+
+gatk4 CreateSomaticsPanelOfNormals -R $ref -V gendb://$pon_db -O pon_out.vcf 
+
+
+# OR you could try this ref: https://gatk.broadinstitute.org/hc/en-us/articles/360036900132-CreateSomaticPanelOfNormals-BETA-
+
+ gatk Mutect2 \
+   -R ref_fasta.fa \
+   -I normal1.bam \
+   -tumor normal1_sample_name \
+   --germline-resource af-only-gnomad.vcf.gz \
+   -O normal1_for_pon.vcf.gz
+
+ gatk CreateSomaticPanelOfNormals \
+   -vcfs normal1_for_pon_vcf.gz \
+   -vcfs normal2_for_pon_vcf.gz \
+   -vcfs normal3_for_pon_vcf.gz \
+   -O pon.vcf.gz
+ 
+# 2.  mutect
+#ref: https://gatk.broadinstitute.org/hc/en-us/articles/360035894731-Somatic-short-variant-discovery-SNVs-Indels-
+
+tumor_command_line="-I tumor.bam -tumor tumor_name"
+normal_command_line="-I normal.bam -normal normal_name"
+
+gatk4 Mutect2 \
+    -R {ref} \
+    $tumor_command_line \
+    $normal_command_line \
+    --germline-resource $germline-resource \
+    -pon pon_out.vcf \
+    --f1r2-tar-gz flr2.tar.gz
+    -L intervals \
+    -O somatic.vcf.gz
+
+ # if single tumor sample then without normal_command_line
+
+
+# 3. contamination assessment 
+
+gatk4 GetPileupSummaries \
+     -R {ref} \
+	 -I $tumorBam \
+     -V $small_exac_common_3.hg38.vcf.gz \
+     -O tumor-pileups.table
+
+# normal tissue is optional
+gatk4 GetPileupSummaries \
+     -R {ref} \
+     -I $NormalBam \
+     -V $small_exac_common_3.hg38.vcf.gz \
+     -O Normal-pileups.table
+
+# read orientation model
+gatk LearnReadOrientationModel -I f1r2.tar.gz -O read-orientation-model.tar.gz
+
+# cauculate contamition
+gatk4 CalculateContamination \
+    -I tumor-pileups.table \
+    -O tumor-cauculation.table \
+    -matched Normal-pileups.table
+
+# Filter mutect calls
+gatk4 FilterMutectCalls \
+    -V somatic.vcf.gz \
+    --contamination-table tumor-cauculation.table \
+    --ob-priors read-orientation-model.tar.gz \
+    -O somatic_match_m2_oncefiltered.vcf.gz
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -209,8 +488,6 @@ ref: https://doc-openbio.readthedocs.io/projects/annovar/en/latest/
 
 
 
-
-
 ### 2. snpEff
 
 download snpEff from: 
@@ -220,25 +497,22 @@ sneff build:
 ```bash
 cd snpEff
 mkdir genomes
-mkidr arath
-
-
-
-
+mkdir arath
 
 ```
 
 snpEff 
 
 
-
-
 ### gff3 to gtf tools
 
 gffread in cufflinks
+
 
 gffread gff3 -T -o gtf
 
 gffread gtf -o- > gff3
 1. ncbi - genome
-2. ensemble - 
+2. ensemble - http://asia.ensembl.org/info/data/ftp/index.html
+
+	* http://plants.ensembl.org/index.html
