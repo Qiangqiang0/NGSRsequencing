@@ -1,24 +1,39 @@
-# NGS Resequencing
+# NGS Resequencing, RNAseq, gatk4, indel, snp, cnv 
+# somatic snp indel
+# germline snp indel
+# RNAseq snp indel
+#
 
 # GWAS, Construct genetic map, population evolution
 
 
 ## 1. GATK TOOLS PIPLINE
 
-* __germline__: preprocess --> haplotyperCaller --> VQSR --> downstream
-
-* __somatic__: preprocess --> mutect
 
 ### 1. Basics
 
-preparations: genome
-
-out: genome index
-
 raw_data(fastq) --> trimmomatic(fastq) --> bwa(sam) -->samtools(bam,sorted) --> GATK(vcf)
 
-### 2. code
+* __germline__: preprocess --> haplotyperCaller --> VQSR --> annotation -->  downstream
 
+* __somatic__: preprocess --> mutect --> Contamination --> orientation bias ---> filter --> annotation --> downstream
+
+* 
+
+__Prequsite__
+
+* What is haplotypeCaller/Mutect2 doing?
+
+* What is VQSR ? and CNNScore ? and explain the priciple?
+
+* What is annotation doing? explain the result?
+
+* Where is contamination come from? how to filter them?
+
+* What is orientation? how to filter them?
+
+
+#### 2.DNA WORKFLOW
 0. fastdump
 
 ```bash
@@ -32,16 +47,6 @@ fasterq-dump --split-3 -O outdir seq.sra
 ```bash
 bwa index ref.fa
 samtools faidx ref.fa
-```
-
-0. install gatk
-```bash
-# conda
-
-conda install gatk
-# run gatk-register to get the download page
-gatk-register /dowloadedgatk.jar|tar.bz2
-
 ```
 
 #### 1. fastqc
@@ -395,30 +400,110 @@ gatk4 FilterMutectCalls \
 ```
 
 
+### 3.RNAseq snp indel
+
+* what is two pass mode? why it increase the performance?
+
+* 
+
+* STAR --> Data Cleanup --> SplitCigarReads --> BSQR --> HaplotypeCaller --> VariantFiltration
 
 
 
+```bash
+# 1. star align
+
+# 1.1 genome index building
+STAR --runMode genomeGenerate \
+    --runThreadN $threads \
+    --genomeDir $refDir \
+    --genomeFastaFiles $ref \
+    --sjdbGTFfile $refGtf
+
+# 1.2 genome alignment
+STAR --genomDir ref \
+    --runThreadN $threads \
+    --readFilesIn $forward $backward \
+    --twopassMode Basic \
+    --readFileCommand zcat \
+    --outFileNamePrefix $prefix \
+    --outSAMtupe BAM SoteByCoordinate \
+    --outBAMsortingThreadN 10 
+
+```
+
+```bash
+# 2. Preprocess: Merge bam, MarkDuplicates
+
+# ref: https://gatk.broadinstitute.org/hc/en-us/articles/360036862771-MergeBamAlignment-Picard-
+# ref: https://gatk.broadinstitute.org/hc/en-us/articles/360036510672-FastqToSam-Picard-
+
+picard FastqToSam \
+    F1=$forward \
+    F2=$backward \
+    O=${unaligned}.bam \
+    SM=$sample \
+    RG=$readGroupName
+
+gatk4 MergeBamAlignment \
+    --REFERENCE_SEQUENCE $ref \
+    --UNMAPPED_BAM ${unaligned}.bam \
+    --ALIGNED_BAM $prefix.bam \
+    --OUTPUT ${prefix}.merge.bam \
+    --INCLUDE_SECONDARY_ALIGNMENTS false \
+    --VALIDATION_STRINGENCY SILENT
+
+gatk4 MarkDuplicates \
+    --Input ${prefix}.merge.bam \
+    --Output ${prefix}.merge.dup.bam \
+    --CREATE_INDEX true \
+    --CALIDATION_STRINGENCY SILENT \
+    --METRICS_FILE ${prefix}.merge.dup.metrics
+
+gatk4 SplitNCigarReads \
+    -R $ref \
+    -I ${prefix}.merge.dup.bam \
+    -O ${prefix}.merge.dup.split.bam
 
 
+gatk4 BaseRecalibrator \
+    -R $ref \
+    -I ${prefix}.merge.dup.split.bam \
+    -O ${prefix}.recal \
+    -known-sites $known-sites
+    --use-original-qualities
 
+gatk4 ApplyBQSR \
+    --add-output-sam-program-record \
+    -R $ref \
+    -I ${prefix}.merge.dup.split.bam \
+    -O ${prefix}.merge.dup.split.vqsr.bam \
+    -OQ \
+    ---bqsr-recal-file ${prefix}.recal
 
+```
 
+```bash
+gatk4 HaplotypeCaller \
+    -R ${ref} \
+    -I ${ \
+    -L ${interval_list} \
+    -O ${prefix}.vcf.gz \
+    -dont-use-soft-clipped-bases \
+    --standard-min-confidence-threshold-for-calling ${default=20 stand_call_conf} \
+    --dbsnp $dbsnp
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+gatk4 VariantFiltration \
+    --R ${ref} \
+    --V ${prefix}.vcf.gz \
+    --window 35 \
+    --cluster 3 \
+    --filter-name "FS" \
+    --filter "FS > 30.0" \
+    --filter-name "QD" \
+    --filter "QD < 2.0" \
+    -O ${prefix}.filter.vcf
+```
 
 
 
